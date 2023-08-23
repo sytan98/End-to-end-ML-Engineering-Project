@@ -1,0 +1,13 @@
+name: mlengineering-project
+
+entry_points:
+  hyperopt:
+    parameters:
+      max_runs: {type: int, default: 12}
+      metric: {type: string, default: "rmse"}
+      algo: {type: string, default: "tpe.suggest"}
+      seed: {type: int, default: 97531}
+    command: "python search.py --max-runs {max_runs}
+                               --metric {metric}
+                               --algo {algo}
+                               --seed {seed}"
