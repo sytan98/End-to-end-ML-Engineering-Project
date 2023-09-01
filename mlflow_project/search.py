@@ -15,7 +15,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
-from dags.steps import hyperparameter_tuning
+from dags.model_experimentation import hyperparameter_tuning
 
 logging.basicConfig(level=logging.WARN)
 logger = logging.getLogger(__name__)

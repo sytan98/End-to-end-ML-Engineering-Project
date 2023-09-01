@@ -1,46 +1,37 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
-import pandas as pd
 from airflow.decorators import dag, task
-from pendulum import datetime
-from sklearn.model_selection import train_test_split
+from datetime import datetime 
 
-from steps import deploy_model, hyperparameter_tuning, register_model, train_model
+from model_experimentation import (
+    deploy_model,
+    hyperparameter_tuning,
+    register_model,
+)
+from dataset_gen import check_for_new_data, prepare_new_data
 
 logging.basicConfig(level=logging.WARN)
 logger = logging.getLogger(__name__)
 
 
 @dag(
-    schedule=None,
-    start_date=datetime(2023, 1, 1),
-    catchup=False,
+    dag_id="mlops_pipeline",
+    start_date=datetime(2014, 1, 1),
+    schedule="@yearly",
+    fail_stop=True,
+    max_active_runs=1
 )
 def mlflow_tutorial_dag():
+    @task.short_circuit()
+    def check_for_new_data_stage(prev_ds=None, ds=None):
+        prev_date = datetime.strptime(prev_ds, "%Y-%m-%d")
+        current_date = datetime.strptime(ds, "%Y-%m-%d")
+        return check_for_new_data(prev_date, current_date)
+    
     @task
-    def build_dataset_stage():
-        # Read the wine-quality csv file from the URL
-        csv_url = "https://raw.githubusercontent.com/mlflow/mlflow/master/tests/datasets/winequality-red.csv"
-        try:
-            data = pd.read_csv(csv_url, sep=";")
-        except Exception as e:
-            logger.exception(
-                "Unable to download training & test CSV, check your internet connection. Error: %s",
-                e,
-            )
-
-        # Split the data into training and test sets. (0.75, 0.25) split.
-        train, test = train_test_split(data)
-        train, valid = train_test_split(train)
-
-        # The predicted column is "quality" which is a scalar from [3, 9]
-        train_x = train.drop(["quality"], axis=1)
-        val_x = valid.drop(["quality"], axis=1)
-        test_x = test.drop(["quality"], axis=1)
-        train_y = train[["quality"]]
-        val_y = valid[["quality"]]
-        test_y = test[["quality"]]
+    def build_dataset_stage(csv_urls: List[str]):
+        train_x, val_x, test_x, train_y, val_y, test_y = prepare_new_data(csv_urls)
         return {
             "train_x": train_x,
             "val_x": val_x,
@@ -67,7 +58,7 @@ def mlflow_tutorial_dag():
     def deploy_model_stage(mlflow_run_id: str):
         return deploy_model(mlflow_run_id)
 
-    deploy_model_stage(register_model_stage(hyperparameter_tuning_stage(build_dataset_stage())))
+    deploy_model_stage(register_model_stage(hyperparameter_tuning_stage(build_dataset_stage(check_for_new_data_stage()))))
 
 
 mlflow_tutorial_dag()

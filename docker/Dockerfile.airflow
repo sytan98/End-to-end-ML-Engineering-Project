@@ -1,7 +1,7 @@
 FROM apache/airflow:2.7.0
 
-COPY ./docker/requirements.txt . 
+COPY ./docker/requirements_airflow.txt . 
 
 ENV MLFLOW_TRACKING_URI=http://mlflow:5000
 
-RUN pip install -r requirements.txt
+RUN pip install -r requirements_airflow.txt
