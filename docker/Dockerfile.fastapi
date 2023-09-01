@@ -1,0 +1,14 @@
+FROM python:3-slim-buster
+
+RUN mkdir /code
+
+WORKDIR /code
+
+COPY ./docker/requirements_api.txt .
+
+RUN pip install -r requirements_api.txt
+
+COPY ./api .
+ENV MLFLOW_TRACKING_URI=http://mlflow:5000
+
+CMD ["uvicorn", "main:app", "--host=0.0.0.0", "--port=8081"]
