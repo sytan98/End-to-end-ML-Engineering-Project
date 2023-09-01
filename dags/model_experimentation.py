@@ -7,6 +7,7 @@ import numpy as np
 from hyperopt import fmin, hp, rand, tpe
 from mlflow.models import infer_signature
 from mlflow.tracking.client import MlflowClient
+import requests
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 MODEL_NAME = "CatBoostModel"
@@ -111,3 +112,8 @@ def deploy_model(model_version: str):
         stage="Production",
         archive_existing_versions = True
     )
+
+def trigger_model_reload():
+    response = requests.post("http://api:8081")
+    while response.status_code != 200:
+        response = requests.post("http://api:8081")

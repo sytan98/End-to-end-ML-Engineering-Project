@@ -8,12 +8,13 @@ from typing import Tuple
 import aiohttp
 import mlflow.pyfunc
 import pandas as pd
-from fastapi import FastAPI, File, UploadFile
-# from pyspark.sql import SparkSession
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from geopy import distance
 from models import HouseDetails
+from starlette import status
 
 app = FastAPI(swagger_ui_parameters={"tryItOutEnabled": True})
+app.state.ml_model = None
 
 MODEL_NAME, STAGE = "CatBoostModel", "Production"
 
@@ -26,7 +27,6 @@ mrt_stations_df = pd.read_csv(
 )
 RAFFLES_PLACE_LAT, RAFFLES_PLACE_LONG = 1.284184, 103.85151
 
-# spark = SparkSession.builder.getOrCreate()
 
 @lru_cache(maxsize=None)
 def calculate_geodesic_dist(
@@ -73,6 +73,7 @@ async def async_get_coordinates(address: str) -> Tuple[float, float]:
         except Exception as e:
             return (None, None)
 
+
 async def limit_openmapapi_calls(df: pd.DataFrame, func):
     df["house_lat"] = None
     df["house_long"] = None
@@ -89,56 +90,70 @@ async def limit_openmapapi_calls(df: pd.DataFrame, func):
         time.sleep(5)
 
 
+@app.post("/reload_model/")
+async def reload_model():
+    app.state.ml_model = mlflow.pyfunc.load_model(
+        model_uri=f"models:/{MODEL_NAME}/{STAGE}"
+    )
+    return "Model loaded"
+
+
 @app.post("/predict/")
 async def predict(house_details: HouseDetails):
-    house_lat, house_long = await async_get_coordinates(house_details.address)
-    distance_cbd = calculate_geodesic_dist(
-        house_lat, house_long, RAFFLES_PLACE_LAT, RAFFLES_PLACE_LONG
-    )
-    distance_top_primary = calculate_dist_to_nearest_primary_school(
-        house_lat, house_long
-    )
-    distance_mrt = calculate_dist_to_nearest_mrt_station(house_lat, house_long)
-    model = mlflow.pyfunc.load_model(model_uri=f"models:/{MODEL_NAME}/{STAGE}")
-    input = pd.DataFrame(
-        {
-            "town": house_details.town,
-            "flat_type": house_details.flat_type,
-            "storey_range": house_details.storey_range,
-            "floor_area_sqm": house_details.floor_area_sqm,
-            "flat_model": house_details.flat_model,
-            "remaining_lease": house_details.remaining_lease,
-            "distance_cbd": distance_cbd,
-            "distance_top_primary": distance_top_primary,
-            "distance_mrt": distance_mrt,
-        },
-        index=[0],
-    )
-    print(input)
-    output = model.predict(input)[0]
-    print(output)
-    return {"resale per sqm": output, "resale": output * house_details.floor_area_sqm}
+    if model := app.state.ml_model:
+        house_lat, house_long = await async_get_coordinates(house_details.address)
+        distance_cbd = calculate_geodesic_dist(
+            house_lat, house_long, RAFFLES_PLACE_LAT, RAFFLES_PLACE_LONG
+        )
+        distance_top_primary = calculate_dist_to_nearest_primary_school(
+            house_lat, house_long
+        )
+        distance_mrt = calculate_dist_to_nearest_mrt_station(house_lat, house_long)
+        input = pd.DataFrame(
+            {
+                "town": house_details.town,
+                "flat_type": house_details.flat_type,
+                "storey_range": house_details.storey_range,
+                "floor_area_sqm": house_details.floor_area_sqm,
+                "flat_model": house_details.flat_model,
+                "remaining_lease": house_details.remaining_lease,
+                "distance_cbd": distance_cbd,
+                "distance_top_primary": distance_top_primary,
+                "distance_mrt": distance_mrt,
+            },
+            index=[0],
+        )
+        print(input)
+        output = model.predict(input)[0]
+        print(output)
+        return {
+            "resale per sqm": output,
+            "resale": output * house_details.floor_area_sqm,
+        }
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_425_TOO_EARLY, detail="Model not ready yet"
+        )
 
 
 @app.post("/batch_predict/")
 async def batch_predict(csv_file: UploadFile = File(...)):
     df = pd.read_csv(csv_file.file)
-    
-    # Convert resale price to resale price per sqm
-    df["resale_price_per_sqm"] = df.resale_price / df.floor_area_sqm
-    df = df.drop(columns="resale_price")
+    # TODO: Spark Batch Prediction pipeline
+    # # Convert resale price to resale price per sqm
+    # df["resale_price_per_sqm"] = df.resale_price / df.floor_area_sqm
+    # df = df.drop(columns="resale_price")
 
-    # Convert month, flat_type, storey_range, flat_model to categorical values
-    df.month = pd.Categorical(df.month)
-    df.town = pd.Categorical(df.town)
-    df.flat_type = pd.Categorical(df.flat_type)
-    df.storey_range = pd.Categorical(df.storey_range)
-    df.flat_model = pd.Categorical(df.flat_model)
+    # # Convert month, flat_type, storey_range, flat_model to categorical values
+    # df.month = pd.Categorical(df.month)
+    # df.town = pd.Categorical(df.town)
+    # df.flat_type = pd.Categorical(df.flat_type)
+    # df.storey_range = pd.Categorical(df.storey_range)
+    # df.flat_model = pd.Categorical(df.flat_model)
 
-    # Set types
-    df["block"] = df["block"].astype("string")
-    df["street_name"] = df["street_name"].astype("string")
-    print(df.head())
+    # # Set types
+    # df["block"] = df["block"].astype("string")
+    # df["street_name"] = df["street_name"].astype("string")
     # await limit_openmapapi_calls(df, async_get_coordinates)
     # df = df.dropna(subset=["house_lat", "house_long"])
 
@@ -159,13 +174,11 @@ async def batch_predict(csv_file: UploadFile = File(...)):
     #         "house_lat",
     #         "house_long",
     #         "month",
-    #     ] 
+    #     ]
 
     # input_df = df.drop(columns=columns_to_drop)
     # spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
-    # spark_df = spark.createDataFrame(input_df) 
-    # result_pdf = spark_df.select("*").toPandas()
-    # print(result_pdf.head())
+    # spark_df = spark.createDataFrame(input_df)
     # pyfunc_udf = mlflow.pyfunc.spark_udf(spark, f"models:/{MODEL_NAME}/{STAGE}")
     # output_df = spark_df.withColumn("prediction", pyfunc_udf())
     # return output_df

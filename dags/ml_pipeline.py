@@ -8,6 +8,7 @@ from model_experimentation import (
     deploy_model,
     hyperparameter_tuning,
     register_model,
+    trigger_model_reload,
 )
 from dataset_gen import check_for_new_data, prepare_new_data
 
@@ -56,7 +57,8 @@ def mlflow_tutorial_dag():
 
     @task
     def deploy_model_stage(mlflow_run_id: str):
-        return deploy_model(mlflow_run_id)
+        deploy_model(mlflow_run_id)
+        return trigger_model_reload()
 
     deploy_model_stage(register_model_stage(hyperparameter_tuning_stage(build_dataset_stage(check_for_new_data_stage()))))
 
