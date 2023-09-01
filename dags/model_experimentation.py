@@ -114,6 +114,6 @@ def deploy_model(model_version: str):
     )
 
 def trigger_model_reload():
-    response = requests.post("http://api:8081")
+    response = requests.post("http://api:8081/reload_model")
     while response.status_code != 200:
-        response = requests.post("http://api:8081")
+        response = requests.post("http://api:8081/reload_model")

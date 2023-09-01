@@ -1,6 +1,7 @@
 # Project specific
 db_data/
 minio_data/
+access_token.env
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
